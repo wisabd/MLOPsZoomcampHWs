@@ -1,30 +1,36 @@
 #!/usr/bin/env python
-#
+# coding: utf-8
 
-# In[2]:
+# In[21]:
+
+
+get_ipython().system('python -V')
+
+
+# In[22]:
 
 
 import pandas as pd
 import pickle
-from sklearn.metrics import root_mean_squared_error
+from sklearn.metrics import mean_squared_error
 from sklearn.feature_extraction import DictVectorizer
-import xgboost as xgb
+from sklearn.linear_model import LinearRegression
 import mlflow
-from pathlib import Path
 
 
+# In[23]:
 
 
 df = pd.read_parquet("/Users/muhammadwisalabdullah/Downloads/yellow_tripdata_2023-01.parquet")
 
 
-# In[5]:
+# In[24]:
 
 
 df.head()
 
 
-# In[6]:
+# In[25]:
 
 
 print(df.tpep_dropoff_datetime - df.tpep_pickup_datetime)
@@ -34,14 +40,14 @@ df.duration = df.duration.apply(lambda td: td.total_seconds()/60)
 print(df.duration)
 
 
-# In[7]:
+# In[26]:
 
 
-mlflow.set_tracking_uri("http://localhost:5000")
+mlflow.set_tracking_uri("sqlite:///mlflow.db")
 mlflow.set_experiment("NYC_FarePredictor")
 
 
-# In[8]:
+# In[7]:
 
 
 def read_dataframe1(filename):
@@ -58,7 +64,7 @@ def read_dataframe1(filename):
     return df
 
 
-# In[9]:
+# In[8]:
 
 
 train_df = read_dataframe1("/Users/muhammadwisalabdullah/Downloads/yellow_tripdata_2023-01.parquet")
@@ -67,32 +73,26 @@ print(train_df.shape)
 print(valid_df.shape)
 
 
-# In[10]:
+# In[9]:
 
 
 train_df['PU_DO'] = train_df['PULocationID'] + '_' + train_df['DOLocationID']
 valid_df['PU_DO'] = valid_df['PULocationID'] + '_' + valid_df['DOLocationID']
 
 
-# In[11]:
+# In[10]:
 
 
 valid_df.head()
 
 
-# In[12]:
+# In[11]:
 
 
 categorical = ['PU_DO']
 
 
-# In[ ]:
-
-
-
-
-
-# In[13]:
+# In[12]:
 
 
 train_dicts = train_df[categorical].to_dict(orient='records')
@@ -101,73 +101,58 @@ X_train = dv.fit_transform(train_dicts)
 print(f"Dimensionality after OHE: {X_train.shape[-1]}")
 
 
-# In[14]:
+# In[13]:
 
 
 target = 'duration'
 y_train = train_df[target].values
 
 
+# In[14]:
+
+
+lr = LinearRegression()
+lr.fit(X_train, y_train)
+
+
 # In[15]:
+
+
+y_pred = lr.predict(X_train)
+import numpy as np
+
+mse = mean_squared_error(y_train, y_pred)
+rmse = np.sqrt(mse)
+print(rmse)
+
+
+# In[16]:
 
 
 val_dicts = valid_df[categorical].to_dict(orient='records')
 X_val = dv.transform(val_dicts)
+print(f"Dimensionality after OHE: {X_val.shape[-1]}")
 
 
 # In[17]:
 
 
+target = 'duration'
 y_val = valid_df[target].values
+y_pred = lr.predict(X_val)
+mse = mean_squared_error(y_val, y_pred)
+rmse = np.sqrt(mse)
+print(rmse)
 
 
 # In[20]:
 
 
-
-models_folder = Path('models')
-models_folder.mkdir(exist_ok=True)
-
-
-# In[21]:
-
-
-with mlflow.start_run(run_name="NYC_FarePredictor"):
-    train = xgb.DMatrix(X_train, label=y_train)
-    valid = xgb.DMatrix(X_val, label=valid_df[target])
-
-
-    best_params = {
-        'learning_rate': 0.09585,
-        'max_depth': 30,
-        'min_child_weight': 1.6059,
-        'objective': 'reg:linear',
-        'reg_alpha': 0.018,
-        'reg_lambda': 0.01165,
-        'seed': 42,
-    }
-
-    mlflow.log_params(best_params)
-    booster = xgb.train(
-        params=best_params,
-        dtrain=train,
-        num_boost_round=30,
-        evals=[(valid, "validation")],
-        early_stopping_rounds=50,
-    )
-    y_pred = booster.predict(valid)
-    rmse = root_mean_squared_error(y_val, y_pred)
-    mlflow.log_metric("rmse", rmse)
-
-    with open("models/preprocessor.b", "wb") as f_out:
+with mlflow.start_run(run_name="NYC_FarePredictor-LinearRegression"):
+    mlflow.log_param("rmse", rmse)
+    with open("dict_vectorizer.bin", "wb") as f_out:
         pickle.dump(dv, f_out)
-    mlflow.log_artifact("models/preprocessor.b", artifact_path="preprocessor")
+    mlflow.log_artifact("dict_vectorizer.bin")
 
-    mlflow.xgboost.log_model(booster, artifact_path="models_mlflow")
-
-
-# In[ ]:
-
-
-
+    mlflow.log_model(lr, artifact_path="model")
 
